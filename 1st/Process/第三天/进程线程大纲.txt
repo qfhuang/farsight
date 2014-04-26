@@ -1,0 +1,403 @@
+四天：
+第一天：
+1，进程和程序的概念和区别
+2，进程构成(段结构)和主要参数（pid）
+3， 进程的分类：
+	交互进程
+	批处理进程
+	守护进程
+4，进程的状态变换
+5，进程的管理
+	a，启动方式：手动，系统启动时调度
+	b，管理进程的各种命令
+6，多进程编程接口：
+	fork();
+	exec();函数族
+	exit()和_exit();
+	wait和waitpid();
+
+第二天：
+1，,守护进程编写：
+	a，守护进程的定义和作用
+	b，进程和终端，守护进程和终端是分离的
+	c，控制终端，登录会话和进程组的概念
+	d，信号
+	e，syslogd
+
+	//==============守护进程创建步骤==================
+	    //忽略信号的影响
+	    signal(SIGHUP, SIG_IGN);
+	    signal(SIGTSTP, SIG_IGN);
+	    //第一次fork，为子进程调用setsid做准备
+	    pid = fork();
+	    if(pid > 0)
+		exit(0);
+	    //调用setsid()，创建新的会话；
+	    setsid();
+	    
+	    //第二次fork
+	    pid = fork();
+	    if(pid > 0)
+		exit(0);
+	    
+	    //调用setpgrp(),创建新的进程组
+	    setpgrp();
+
+	    //关闭所有从父进程继承过来的文件描述符
+	    max_fd = sysconf(_SC_OPEN_MAX);
+	    for (i = 0; i < max_fd;i++)
+		close(i);
+	    //消除umask的影响
+	    umask(0);
+	    //改变进程当前工作目录
+	    chdir("/");
+	    //将标准I/O进行重定向
+		fd = open("/dev/null",O_RDWR);
+	    dup(fd);
+	    dup(fd);
+
+
+2，进程间通信的缘故
+3，进程间通信几种方式
+4，管道：无名和有名管道
+	a,无名管道：(也叫匿名管道）
+		1，对于管道中使用的文件描述符没有路径名，它们只是在内存中跟某一个索引节点相关联的两个文件描述符。
+		2，只能用于具有亲缘关系的进程(父子关系进程间、或是在兄弟关系)之间的通信
+		3，半双工的通信模式，具有固定的读端和写端，数据只能在一个方向上移动
+		4，向没有读端的pipe中写入数据的进程会收到SIGPIPE(出现Broken pipe出错信息，系统默认处理关闭进程)
+			4.1：比如进程间通信的时候，另外一个进程提前退出了
+			4.2在网络编程的时候也会出现类似情况
+		5, 接口：
+			int pipe(int fd[2]);
+			参数int fd[2]为一个长度为2的文件描述符数组，fd[0]是读出端,fd[1]是写入端
+			当函数成功返回，自动维护了一个从fd[1]到fd[0]的数据通道。
+			也即是说在一个进程中智能是用写fd[1]， 读fd[0]
+			应用：1，可以在一个进程里进行读写
+			      2，可以在父子进程间进行读写
+			
+	b,有名管道
+		1，使互不相关的两个进程互相通信
+		2，有名管道可以通过路径名来指出，并且在文件系统中可见
+		3，进程通过文件IO来操作有名管道，即是可以通过read,write接口操作
+		4，有名管道遵循先进先出规则，不支持如lseek() 操作
+		5，接口：
+			int mkfifo(const char *pathname, mode_t mode);
+			该函数主要是会创建一个fifo文件，如果要进行读写，需要
+			open();
+			read/write();
+			close();
+
+第三天:
+4，信号， 信号的处理机制，信号的种类，多进程中的信号处理
+	4.1：信号是在软件层次上对中断机制的一种模拟，是一种异步通信方式
+	4.2： 信号是由内核发送给用户进程的
+	4.3：当进程处于休眠(或未被调度)，信号产生后，内核会将其保存下来，当进程重新调度时再发给进程
+	4.4：系统里边定义了三种处理方法：
+		4.4.1: SIG_IGN忽略信号
+			对信号不做任何处理，但是有两个信号不能忽略：即SIGKILL及SIGSTOP。
+		4.4.2: 执行缺省操作：Linux对每种信号都规定了默认操作 
+		4.4.3: 捕捉信号(用户自定义处理)：定义信号处理函数，当信号发生时，执行相应的处理函数。
+	4.5: 信号的分类：
+		kill -l
+		SIGINT : 当在终端ctrl+c或delete键 -->默认进程退出
+		SIGQUIT : 当在终端ctrl+\，和SIGINT类似，会产生core文件 --> 默认进程退出
+		SIGSTP : 当在终端ctrl+z -->默认进程暂停进入后台休眠，不会调度，发送给所有Foreground Group的进程
+				该信号可以做处理
+		SIGCONT ： fg命令唤醒后台进程
+
+		注意：ctrl-d 不是发送信号，而是表示一个特殊的二进制值，表示 EOF
+
+		SIGKILL： kill -9 pid  -->默认进程退出,不可忽略，不能捕捉
+		SIGSTOP: 当在终端ctrl+z -->默认进程昝暂停,和SIGSTP类似，只是不可忽略，不能捕捉
+
+		SIGPIPE： 当往没有读端的pipe，或者是发送数据给已经关闭的socket会产生，默认进程退出
+		SIGCHLD ：当子进程exit()退出时给父进程发送的，默认父进程退出
+		SIGALARM: 用于alarm()函数执行定时器结束后产生的
+		SIGABRT : 调用abort()时产生的信号，将会使进程非正常结束
+
+		SIGILL: 执行非法指令， 默认进程退出
+		SIGFPE: 致命的浮点运算错误，比如除以0， 默认进程退出
+		SIGHUP: 本信号在用户终端连接(正常或非正常)结束时发出, 通常是在终端的控制进程结束时, 
+			通知同一session内的各个作业, 这时它们与控制终端不再关联
+			登录Linux时，系统会分配给登录用户一个终端(Session)。在这个终端运行的所有程序，
+			包括前台进程组和后台进程组，一般都属于这个Session。当用户退出Linux登录时，前台进程组
+			和后台有对终端输出的进程将会收到SIGHUP信号。这个信号的默认操作为终止进程，因此前台进
+			程组和后台有终端输出的进程就会中止 
+		
+		SIGSEGV：非法内存访问
+
+		SIGUSR1:kill -USR1 pid
+			留给用户使用，用户可在应用程序中自行定义
+
+	4.5 接口
+		a，kill(pid_t pid, int sig); 发送信号给进程或进程组
+		b, raise(); 允许进程向自己发送信号
+		c,alarm();
+			一个进程只能有一个闹钟时间。如果在调用alarm时已设置过闹钟时间，
+			则之前的闹钟时间被新值所代替
+		d,pause();
+		e,signal();/sigaction
+		f,信号屏蔽字(process signal mask)
+
+	signal函数中调试不能使用printf函数，不安全,可以用write(1,buf,);
+5,IPC对象：
+	IPC对象:是活动在内核级别的一种进程间通信的工具，包括消息队列、信号量以及共享存储器。
+		存在的IPC对象通过它的标识符来引用和访问，这个标识符是一个非负整数，它唯一的标识了一个IPC对象
+		一个IPC对象时需要指定一个键值(key)，类型为key_t，每一个IPC对象都与一个键相关联,键值到标识符的转换是由系统内核来维护的
+	
+	ipcs命令用于查看系统中的IPC对象
+		ipcs -a
+		ipcs -m
+	ipcrm命令用于删除系统中的IPC对象
+		ipcrm –m 2752516(id)
+	创建的IPC对象如果不删除的话会一直保留在系统中
+
+	选择key的方法:
+		a)IPC_PRIVATE。由内核负责选择一个关键字然后生成一个IPC对象并把IPC标识符直接传递给另一个进程
+		b)使用ftok()函数生成一个关键字 
+
+6，共享内存: 是所有进程间通信效率最高的一种
+	概念：内核专门留出了一块内存区，可以由需要访问的进程将其映射到自己的私有地址空间
+	注意：由于多个进程共享一段内存，因此也需要依靠某种同步机制，如互斥锁和信号量等
+	接口：
+		1，创建/打开共享内存
+			ftkok(); // 创建key
+		        int shmget(key_t key, int size, int shmflg);
+			参数1： IPC对象关联的key，根据这个key可以产生一个IPC标示符
+				ftkok()产生
+				IPC_PRIVATE作为键值可以保证系统建立一个全新的共享内存块(通常为0),保证唯一性
+
+			参数2：请求的内存长度（以字节为单位）
+			参数3：同open函数的权限位，也可以用8进制表示法
+				 IPC_CREAT   如果共享内存不存在，则创建一个共享内存，否则打开操作。
+				 IPC_EXCL    只有在共享内存不存在的时候，新的共享内存才建立，否则就产生
+			返回值：成功：共享内存段标识符,出错为-1
+			实例：
+				int shm_id=shmget(IPC_PRIVATE, 4096, 0666 ) ;
+		2，映射共享内存，即把指定的共享内存映射到进程的地址空间用于访问
+			void *shmat(int shmid, const void *shmaddr, int shmflg);
+			参数1：shmid：要映射的共享内存区标识符
+			参数2：shmaddr：将共享内存映射到指定地址(若为NULL，则表示由系统自动完成映射)
+			参数3：shmflg ：SHM_RDONLY：共享内存只读，默认0：共享内存可读写
+			返回值：成功：映射后的地址，出错：-1
+			实例：
+				char *shmadd = (char *)shmat(shmid,NULL,0);
+		3， 读写共享内存:
+			memcpy(shmadd, buf, sizeof(buf));
+		4,  共享内存的控制
+			int shmctl(int shm_id, int cmd, struct shmid_ds *buf );
+			参数1：sh_mid为所要操作的共享内存段的标识符
+			参数2：命令cmd指明了所要进行的操作
+				 IPC_STAT  (获取对象属性)
+				 IPC_SET (设置对象属性)
+				 IPC_RMID (删除对象)
+			参数3：buf :  指定IPC_STAT/IPC_SET时用以保存/设置属性
+
+			struct shmid_ds{
+				struct ipc_perm    shm_perm;      /* operation perms */ 
+				int                shm_segsz;     /* size of segment (bytes) */ 
+				__kernel_time_t    shm_atime;     /* last attach time */ 
+				__kernel_time_t    shm_dtime;     /* last detach time */ 
+				__kernel_time_t    shm_ctime;     /* last change time */ 
+				__kernel_ipc_pid_t shm_cpid;      /* pid of creator */ 
+				__kernel_ipc_pid_t shm_lpid;      /* pid of last operator */ 
+				unsigned short     shm_nattch;    /* no. of current attaches */ 
+				unsigned short     shm_unused;    /* compatibility */ 
+				void               *shm_unused2; /* ditto - used by DIPC */ 
+				void               *shm_unused3; /* unused */
+			}
+		5，撤销进程中的共享内存映射,使其脱离进程(detach)
+			int shmdt( void *addr);
+			实例：
+			   shmdt(shmadd);
+		6，删除共享内存对象(可选)：
+			共享内存不会随着程序结束而自动消除，要么调用shmctl删除，要么自己用手敲命令去删除，
+			否则永远留在系统中。
+			
+			snprintf(buf, 128,"ipcrm –m %d", sh_mid);
+			sysmtem(buf);
+			或者
+			shmctl(shmid, IPC_RMID, NULL);
+
+7，消息队列（可选）
+8，信号量:
+	概念：  也叫信号灯，主要用于多进程或多线程同步
+		防止出现因多个程序同时访问一个共享资源而引发的一系列问题
+		解决多个进程对同一资源的访问竞争的问题，使在任一时刻只能有一个执行线程访问代码的临界区域，
+		也可以说它是协调进程间的对同一资源的访问权，也就是用于同步进程的。
+		类似于红绿灯一样，十字路口有来往的车辆，红灯了车辆需要等，而另外一个路口的车辆可以走
+	信号量/灯种类：有名信号灯，无名信号灯
+	信号量的值： 1，二值信号灯(类似只有红绿)
+	             2，计数信号灯（类似于红绿还分左，右，中）
+	信号量的使用原理：当信号量的值为0需要等待，等到了之后，需要将信号的值加1
+	             0-1-0
+	接口：
+		1，创建信号量IPC对象
+			int semget(key_t key, int nsems, int semflg);
+			参数1：key：和信号灯集关联的key值
+			参数2：nsems:  信号灯集中包含的信号灯数目
+			参数3：semflg：信号灯集的访问权限，通常为IPC_CREAT | 0666
+			返回值：成功：信号灯集ID （信号灯集中信号灯的编号从0开始）
+
+
+		2，操作信号量(包括P和V操作)
+			int semop ( int semid, struct sembuf  opsptr,  size_t  nops);
+			参数1：semid：信号灯集ID
+			参数2：struct sembuf {
+				   short  sem_num;  //第几个信号量，第一个信号量为0；
+				   short  sem_op;  //对该信号量的操作。
+							       //   1  :  释放资源，V操作
+							       //   -1 :  分配资源，P操作                    
+				   short  sem_flg; // 0,  IPC_NOWAIT,  SEM_UNDO
+						 //通常为SEM_UNDO,在进程没有释放该信号量而终止时，操作系统释放信号量  
+						 IPC_UNDO //程序结束时(不论正常或不正常)，保证信号值会被重设为semop()调用前的值。
+						 这样做的目的在于避免程序在异常情况下结束时未将锁定的资源解锁，造成该资源永远锁定。
+						 IPC_NOWAIT //对信号的操作不能满足时，semop()不会阻塞，并立即返回，同时设定错误信息。
+				};
+
+			参数3：nops:  要操作的信号灯的个数
+			实例：
+				//实现sem信号量的p操作
+				struct sembuf buf;
+				buf.sem_num = 0;//下标
+				buf.sem_op = -1;
+				buf.sem_flg = 0;
+
+				semop(semid, &buf, 1);
+
+				//实现sem信号量的V操作
+				struct sembuf buf;
+				buf.sem_num = 0;//下标
+				buf.sem_op = 1;
+				buf.sem_flg = 0;
+
+				semop(semid, &buf, 1);	
+
+				//信号量集中有两个信号量,对第一个信号量进行V操作,对第二个进行P操作
+				struct sembuf buf[2];
+
+				buf[0].sem_num = 0;
+				buf[0].sem_op = 1;
+				buf[0].sem_flg = 0;
+
+				buf[1].sem_num = 1;
+				buf[1].sem_op = -1;
+				buf[1].sem_flg = 0;
+
+				semop(semid, buf,  2);
+					
+		3， 控制信号灯（比如获取信号量的信息，删除信号量）
+			int semctl ( int semid, int semnum,  int cmd ，…/*union semun arg*/);
+			参数1：semid：信号灯集ID
+			参数2：semnum: 要修改的信号灯编号
+			参数3：cmd如下：
+				IPC_STAT读取一个信号量集的数据结构semid_ds，并将其存储在semun中的buf参数中。
+				IPC_SET设置信号量集的数据结构semid_ds中的元素ipc_perm，其值取自semun中的buf参数。
+				IPC_RMID将信号量集从内存中删除。
+				GETALL用于读取信号量集中的所有信号量的值。
+				GETNCNT返回正在等待资源的进程数目。
+				GETPID返回最后一个执行semop操作的进程的PID。
+				GETVAL返回信号量集中的一个单个的信号量的值。
+				GETZCNT返回这在等待完全空闲的资源的进程数目。
+				SETALL设置信号量集中的所有的信号量的值。
+				SETVAL设置信号量集中的一个单独的信号量的值。
+
+	                semctl是可变参数函数：cmd为GETVAL或SETVAL时，需要传递第四个参数。参数类型为union semun
+			union semun{  
+			    int val;  // SETVAL时，设置某个信号量的值
+			    struct semid_ds *buf;  // IPC_STAT、IPC_SET 使用缓存区
+			    unsigned short *arry;  // GETALL,、SETALL 使用的数组 对于设置多个信号量时
+			};  
+			实例：
+			//将信号量sem的值初始化为1
+				union semun sem_p;
+				sem_p.val = 1;
+				semctl(semid, 0, SETVAL, sem_p);
+
+			
+	    这两字母来自荷兰语等待(passeren：通过，如同临界区前的检测点) -1(占用了资源)
+	    与(vrjgeven：释放，如同释放临界区的控制权) +1(给别人提供资源)
+	    
+
+第四天：
+1，线程和进程的区别和关系
+	a, 进程系统分配资源的最小单位，线程是系统调度的最小单位，线程寄存于进程，如果进程消亡，线程也跟着消亡
+	b，线程和进程在内核中被当成同样的调度对象struct task_struct，在竞争CPU时,机会均等,线程和进程的执行顺序不确定
+	c, 线程共享进程的资源.但是线程有独立的pc，栈，TID，错误码和信号掩码，状态属性
+
+2，线程的操作
+	a，创建：
+		int  pthread_create(pthread_t *thread,  const pthread_attr_t *attr,  void * (* routine)(void *),  void *arg)
+	b，退出：
+		int  pthread_exit(void *value_ptr) ；
+	c，主线程操作子线程方法：
+		等待子线程退出，并回收资源(类似于进程的wait())
+			int  pthread_join(pthread_t thread,  void **value_ptr) 
+		
+		发送终止信号给thread线程，如果成功则返回0，否则为非0值。发送成功并不意味着thread会终止
+			（类似于给进程发信号）
+				int  pthread_cancel(pthread_t thead) 
+			线程能否被cancel取决于两点：
+			1，cancel功能是否使能： pthread_setcancel_state()
+			2, cancel的类型（取消的方式）：pthread_setcanceltype()
+				asynchronous : 获取到cancel信号时理解canel线程
+				deferred ： 默认是这种，cancel会延后，直到到达一个cancel点
+		设置线程分离属性：
+			int pthread_detach(pthread_t thread);
+			当线程退出时，线程所对应的资源自动被系统回收
+			而不需要主线程来回收，也即是说不用主线程执行pthread_join();
+
+3，在进程内部，出错编码errno为一个全局变量，每次出错之后会对它重新赋值。进程和线程的errno是两个相互独立的变量。
+4，线程结束的条件：
+	1、线程体的代码执行结束；
+	2、当进程结束，线程无条件结束
+	3、在线程中调用pthread_exit()或return ;
+	4、线程被取消(pthread_cancel);
+	5、线程被杀死（pthread_kill）;
+3, 多线程的同步和互斥
+	同步： 多线程在操作同一个资源时是按照一定的顺序来操作的
+	互斥： 多线程在操作同一个资源时是抢占式的，并且一个线程操作资源时，其他线程是不允许操作的
+
+	多线程同步的机制：互斥锁，信号量，条件变量
+	多线程同步的操作：P/V操作
+		P操作：申请使用资源，使用时会消耗，所以等待，减法
+		V操作：释放资源, 使用时会释放，所以加法
+	a，信号量（唯一一个既可以用于线程，也可以用于进程同步的机制）
+		
+		1，int  sem_init(sem_t *sem,  int pshared,  unsigned int value); 
+			初始化一个匿名信号量（用于同一进程中的线程，有名信号量主要用于进程间）
+		2，int sem_wait(sem_t *sem);   //  P操作
+			等待获取信号量，大概信号量为0时，会阻塞，等到(只有有资源时才能减)后会减1
+		int sem_post(sem_t *sem);  // V操作 
+			释放信号量，不会阻塞，会加1
+		int sem_trywait(sem_t *sem);
+		int sem_getvalue(sem_t *sem,  int *svalue);
+	b，互斥锁：可以实现线程的互斥
+		
+		初始化互斥锁
+			静态方式：
+				pthread_mutex_t fastmutex = PTHREAD_MUTEX_INITIALIZER;
+			动态方式：
+				int  pthread_mutex_init(pthread_mutex_t  *mutex, pthread_mutexattr_t *attr) ;
+		
+		
+		申请上锁：如果锁已经被上锁了，该函数会被阻塞
+			int  pthread_mutex_lock(pthread_mutex_t *mutex) ；
+		释放锁：
+			int  pthread_mutex_unlock(pthread_mutex_t *mutex) 
+		
+		销毁锁：
+			int pthread_mutex_destroy(pthread_mutex_t *mutex);
+	
+		死锁的概念（在同步的时候容易出现）：有时，可能需要同时访问两个资源。您可能正在使用其中的一个资源，随后发现还需要另一个资源。
+		如果两个线程尝试声明这两个资源，但是以不同的顺序锁定与这些资源相关联的互斥锁，则会出现问题。
+		例如，如果两个线程分别锁定互斥锁1 和互斥锁 2，则每个线程尝试锁定另一个互斥锁时，将会出现死锁。
+		
+	
+	c， 条件变量：
+		互斥锁一个明显的缺点是它只有两种状态：锁定和非锁定。而条件变量通过允许线程阻塞和等待另一个线程发
+		送信号的方法弥补了互斥锁的不足
+		
+
+	
+		
